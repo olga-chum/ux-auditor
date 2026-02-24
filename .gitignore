@@ -1,0 +1,14 @@
+# Виртуальное окружение
+venv/
+env/
+
+# Папки с данными и кэшем
+data/
+__pycache__/
+*.pyc
+
+# Настройки редактора
+.vscode/
+
+# Jupyter checkpoint
+.ipynb_checkpoints/

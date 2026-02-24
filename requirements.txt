@@ -1,0 +1,10 @@
+requests==2.31.0
+beautifulsoup4==4.12.3
+selenium==4.18.1
+pandas==2.2.0
+numpy==1.26.3
+scikit-learn==1.4.0
+matplotlib==3.8.2
+seaborn==0.13.2
+jupyter
+ipykernel
