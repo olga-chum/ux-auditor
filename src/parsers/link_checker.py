@@ -10,24 +10,32 @@ from typing import Set, List, Tuple, Dict, Optional
 import os
 from datetime import datetime
 import shutil
+import socks
+import socket
 
 
 class LinkChecker:
     """
     Класс для проверки ссылок на сайте.
     """
-    
-    def __init__(self, start_url: str, delay: float = 1.0):
+    def __init__(self, start_url: str, delay: float = 1.0, use_proxy: bool = False, proxy_config: dict = None):
         """
         Инициализация чекера.
         
         Args:
             start_url: Начальный URL
             delay: Задержка между запросами (секунды)
+            use_proxy: Использовать ли прокси
+            proxy_config: Настройки прокси
         """
         self.start_url = start_url.rstrip('/')
         self.delay = delay
         self.visited_pages: Set[str] = set()
+        
+        # Настройки прокси
+        self.use_proxy = use_proxy
+        self.proxy_config = proxy_config or {}
+        self.proxy_enabled_for_request = False  # Флаг для текущего запроса
         
         # Структуры для хранения ссылок
         self.links_per_page: Dict[str, Set[str]] = {}           # Страница -> все ссылки на ней
@@ -37,7 +45,7 @@ class LinkChecker:
         self.all_links: Set[str] = set()                         # Все уникальные ссылки
         self.broken_links: List[Tuple[str, int, str]] = []       # Битые ссылки (url, статус, тип)
         
-        # Временная папка для HTML
+        # Временная папка для HTML страниц
         self.temp_html_dir = 'data/temp_html'
         
         # Заголовки для имитации реального браузера
@@ -59,7 +67,44 @@ class LinkChecker:
         }
         
         print(f"\nНАЧАЛАСЬ ПРОВЕРКА САЙТА: {self.start_url}")
+        if self.use_proxy:
+            print(f"ПРОКСИ ВКЛЮЧЕН: {self.proxy_config.get('host', 'localhost')}:{self.proxy_config.get('port', 1081)}")
         print("=" * 60)
+    
+    # Метод для проверки, нужен ли прокси для URL
+    def needs_proxy(self, url: str) -> bool:
+        """Проверяет, нужно ли использовать прокси для данного URL."""
+        if not self.use_proxy:
+            return False
+        return any(domain in url for domain in self.PROXY_DOMAINS)
+    
+    # Включение прокси
+    def enable_proxy(self):
+        """Включает SOCKS5 прокси для следующих запросов."""
+        try:
+            host = self.proxy_config.get('host', 'localhost')
+            port = self.proxy_config.get('port', 1080)
+            username = self.proxy_config.get('username')
+            password = self.proxy_config.get('password')
+            
+            if username and password:
+                socks.set_default_proxy(
+                    socks.SOCKS5, 
+                    host, 
+                    port, 
+                    True, 
+                    username, 
+                    password
+                )
+            else:
+                socks.set_default_proxy(socks.SOCKS5, host, port)
+            
+            socket.socket = socks.socksocket
+            self.proxy_enabled_for_request = True
+            print(f"     Прокси включен: {host}:{port}")
+            
+        except Exception as e:
+            print(f"     Ошибка включения прокси: {e}")
     
     def is_same_domain(self, url: str) -> bool:
         """Проверяет, ведет ли ссылка на тот же домен."""
@@ -68,7 +113,7 @@ class LinkChecker:
         return base_domain == url_domain
     
     def normalize_url(self, url: str) -> str:
-        """Приводит URL к нормальному виду (убирает якоря и концевой слеш)."""
+        """Приводит URL к нормальному виду"""
         parsed = urlparse(url)
         normalized = f"{parsed.scheme}://{parsed.netloc}{parsed.path}".rstrip('/')
         if parsed.query:
@@ -96,17 +141,24 @@ class LinkChecker:
     def get_page_links(self, url: str) -> Tuple[Set[str], str]:
         """
         Скачивает страницу и извлекает из нее ссылки.
-        
-        Returns:
-            (все_ссылки_на_странице, html_содержимое)
         """
         all_page_links = set()
         html_content = ""
         
+        original_socket = None
+        if self.use_proxy:
+            try:
+                original_socket = socket.socket
+                host = self.proxy_config.get('host', 'localhost')
+                port = self.proxy_config.get('port', 1081)
+                socks.set_default_proxy(socks.SOCKS5, host, port)
+                socket.socket = socks.socksocket
+            except Exception as e:
+                print(f"Ошибка включения прокси: {e}")
+        
         try:
             print(f"Скачивается: {url}")
             
-            # Используем сессию для сохранения куки и заголовков
             session = requests.Session()
             session.headers.update(self.headers)
             
@@ -137,29 +189,49 @@ class LinkChecker:
         except requests.RequestException as e:
             print(f"Ошибка при скачивании: {e}")
         
+        finally:
+            if original_socket is not None:
+                socket.socket = original_socket
+        
         return all_page_links, html_content
     
     def check_link_status(self, url: str) -> Tuple[bool, int]:
         """
         Проверяет, работает ли HTTP/HTTPS ссылка.
-        Использует GET-запрос с полными заголовками браузера.
         """
+        original_socket = None
+        
+        # Если прокси включен глобально - включаем для всех запросов
+        if self.use_proxy:
+            try:
+                original_socket = socket.socket
+                host = self.proxy_config.get('host', 'localhost')
+                port = self.proxy_config.get('port', 1081)
+                
+                socks.set_default_proxy(socks.SOCKS5, host, port)
+                socket.socket = socks.socksocket
+                print(f"    Прокси включен")
+                
+            except Exception as e:
+                print(f"    Ошибка включения прокси: {e}")
+        
         try:
             session = requests.Session()
             session.headers.update(self.headers)
-            
             response = session.get(url, timeout=15, allow_redirects=True)
-            
-            # Считаем успешными коды 200-399
             is_working = response.status_code < 400
             return is_working, response.status_code
             
         except requests.Timeout:
-            return False, 408  # Request Timeout
+            return False, 408
         except requests.ConnectionError:
-            return False, 521  # Web Server Is Down
+            return False, 521
         except requests.RequestException:
             return False, 0
+        finally:
+            if original_socket is not None:
+                socket.socket = original_socket
+                print(f"    Прокси отключен")
     
     def crawl_and_check(self, max_pages: Optional[int] = None):
         """
@@ -248,6 +320,8 @@ class LinkChecker:
         print(f"Всего ссылок найдено: {len(self.all_links)}")
         print(f"Рабочих ссылок: {working}")
         print(f"Битых ссылок: {broken}")
+        if self.use_proxy:
+            print(f"Прокси: включен ({self.proxy_config.get('host')}:{self.proxy_config.get('port')})")
         print("=" * 60)
     
     def save_detailed_report(self):
@@ -324,6 +398,51 @@ def main():
         url = 'https://' + url
         print(f"Добавлен протокол: {url}")
     
+    # НОВОЕ: Спрашиваем про прокси
+    print("\nИспользовать прокси для обхода блокировок?")
+    print("  • Это поможет проверять ссылки на YouTube, VK и другие заблокированные сайты")
+    use_proxy_input = input("Включить прокси? (y/n, Enter = нет): ").strip().lower()
+    
+    proxy_config = {}
+    if use_proxy_input == 'y':
+        print("\n--- НАСТРОЙКА ПРОКСИ ---")
+        print("Для использования локального VPN:")
+        print("  • Если используете готовый VPN (например, OpenVPN, WireGuard),")
+        print("    прокси уже работает на localhost:1081 (стандартный порт SOCKS5)")
+        print("  • Можно указать другие настройки вручную")
+        
+        use_default = input("\nИспользовать стандартные localhost:1081? (y/n, Enter = да): ").strip().lower()
+        
+        if use_default != 'n':
+            proxy_config = {
+                'host': 'localhost',
+                'port': 1081
+            }
+            print(f"Используется прокси: localhost:1081")
+        else:
+            try:
+                host = input("Хост прокси (например, localhost или 127.0.0.1): ").strip() or 'localhost'
+                port = int(input("Порт прокси (например, 1081): ").strip() or '1')
+                
+                auth_needed = input("Требуется авторизация? (y/n, Enter = нет): ").strip().lower()
+                if auth_needed == 'y':
+                    username = input("Имя пользователя: ").strip()
+                    password = input("Пароль: ").strip()
+                    proxy_config = {
+                        'host': host,
+                        'port': port,
+                        'username': username,
+                        'password': password
+                    }
+                else:
+                    proxy_config = {
+                        'host': host,
+                        'port': port
+                    }
+            except Exception as e:
+                print(f"Ошибка ввода, прокси не будет использован: {e}")
+                use_proxy_input = 'n'
+    
     print("\nСколько страниц обойти?")
     print("  • Введите число (например, 20)")
     print("  • Нажмите Enter для значения по умолчанию (20)")
@@ -345,7 +464,12 @@ def main():
             max_pages = 20
             print("Некорректный ввод, используется значение по умолчанию: 20")
     
-    checker = LinkChecker(url, delay=1.0)
+    checker = LinkChecker(
+        start_url=url, 
+        delay=1.0, 
+        use_proxy=(use_proxy_input == 'y'),
+        proxy_config=proxy_config
+    )
     checker.crawl_and_check(max_pages=max_pages)
 
 
