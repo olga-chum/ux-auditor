@@ -285,30 +285,30 @@ class LinkChecker:
         print(f"\nОбход завершен! Обработано страниц: {len(self.visited_pages)}")
         print(f"Всего найдено уникальных ссылок: {len(self.all_links)}")
         
-        print("\nЭТАП 2: ПРОВЕРКА ССЫЛОК")
-        print("-" * 40)
+    #     print("\nЭТАП 2: ПРОВЕРКА ССЫЛОК")
+    #     print("-" * 40)
         
-        working_count = 0
-        broken_count = 0
+    #     working_count = 0
+    #     broken_count = 0
         
-        total_links = len(self.all_links)
-        for i, link in enumerate(sorted(self.all_links), 1):
-            print(f"  [{i}/{total_links}] Проверяю: {link[:60]}...")
+    #     total_links = len(self.all_links)
+    #     for i, link in enumerate(sorted(self.all_links), 1):
+    #         print(f"  [{i}/{total_links}] Проверяю: {link[:60]}...")
             
-            is_working, status = self.check_link_status(link)
+    #         is_working, status = self.check_link_status(link)
             
-            if is_working:
-                working_count += 1
-                print(f"    {status} OK")
-            else:
-                broken_count += 1
-                self.broken_links.append((link, status, 'http'))
-                print(f"    {status} ОШИБКА")
+    #         if is_working:
+    #             working_count += 1
+    #             print(f"    {status} OK")
+    #         else:
+    #             broken_count += 1
+    #             self.broken_links.append((link, status, 'http'))
+    #             print(f"    {status} ОШИБКА")
             
-            time.sleep(0.5)
+    #         time.sleep(0.5)
         
-        self.print_report(working_count, broken_count)
-        self.save_detailed_report()
+    #     self.print_report(working_count, broken_count)
+    #     self.save_detailed_report()
     
     def print_report(self, working: int, broken: int):
         """Выводит итоговый отчет."""
